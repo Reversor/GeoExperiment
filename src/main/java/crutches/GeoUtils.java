@@ -12,9 +12,9 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
 
-public class Crutch {
+public class GeoUtils {
 
-    public static Iterator<String> toFutureCollection(Iterator<Polygon> it) {
+    public static Iterator<String> toFeatureCollection(Iterator<? extends Geometry> it) {
         ArrayList<String> result = new ArrayList<>();
         GeoJSONWriter writer = new GeoJSONWriter();
         List<Feature> featureList = new ArrayList<>();
@@ -35,11 +35,11 @@ public class Crutch {
         return result.iterator();
     }
 
-    public static Polygon polygonAroundPoint(Point point, int angles, double radius) {
-        Coordinate center = point.getCoordinate();
+    public static Polygon polygonAroundCenter(Geometry geometry, int angles, double radius) {
+        Coordinate center = geometry.getCentroid().getCoordinate();
         Coordinate[] polygonCoordinate = new Coordinate[angles + 1];
-        double distanceX = angles / (111.320 * Math.cos(center.y * Math.PI / 180));
-        double distanceY = angles / 110.574;
+        double distanceX = radius / (111.320 * Math.cos(center.y * Math.PI / 180));
+        double distanceY = radius / 110.574;
         for (int i = 0; i <= angles; i++) {
             double theta = ((double) i / angles) * (2 * Math.PI);
             polygonCoordinate[i] = (new Coordinate(
@@ -47,8 +47,15 @@ public class Crutch {
                     center.y + distanceY * Math.sin(theta)
             ));
         }
+        Polygon result = new GeometryFactory().createPolygon(polygonCoordinate);
+        ;
         polygonCoordinate[angles] = polygonCoordinate[0];
-        return new GeometryFactory().createPolygon(polygonCoordinate);
+        result.setUserData(geometry.getUserData());
+        return result;
+    }
+
+    public static Feature geometryToFeature(Geometry geometry) {
+        return new Feature(new GeoJSONWriter().write(geometry), null);
     }
 
     public static void cleanDir(String strPath) throws IOException {
