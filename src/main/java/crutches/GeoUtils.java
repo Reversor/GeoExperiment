@@ -35,7 +35,7 @@ public class GeoUtils {
         return result.iterator();
     }
 
-    public static Polygon polygonAroundCenter(Geometry geometry, int angles, double radius) {
+    public static Polygon polygonAroundCenter(Geometry geometry, int angles, double radius, GeometryFactory factory) {
         Coordinate center = geometry.getCentroid().getCoordinate();
         Coordinate[] polygonCoordinate = new Coordinate[angles + 1];
         double distanceX = radius / (111.320 * Math.cos(center.y * Math.PI / 180));
@@ -47,7 +47,7 @@ public class GeoUtils {
                     center.y + distanceY * Math.sin(theta)
             ));
         }
-        Polygon result = new GeometryFactory().createPolygon(polygonCoordinate);
+        Polygon result = factory.createPolygon(polygonCoordinate);
         ;
         polygonCoordinate[angles] = polygonCoordinate[0];
         result.setUserData(geometry.getUserData());
@@ -56,6 +56,14 @@ public class GeoUtils {
 
     public static Feature geometryToFeature(Geometry geometry) {
         return new Feature(new GeoJSONWriter().write(geometry), null);
+    }
+
+    public static Point randomPointAroundCoordinate(Coordinate coordinate, double radius, GeometryFactory factory) {
+        double randomDouble = Math.random();
+        double angle = randomDouble * 2 * Math.PI;
+        double x = randomDouble * Math.cos(angle) * radius / (111.320 * Math.cos(coordinate.y * Math.PI / 180));
+        double y = randomDouble * Math.sin(angle) * radius / 110.574;
+        return factory.createPoint(new Coordinate(coordinate.x + x, coordinate.y + y));
     }
 
     public static void cleanDir(String strPath) throws IOException {

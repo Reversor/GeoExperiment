@@ -6,9 +6,11 @@ import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.serializer.KryoSerializer;
 import org.datasyslab.geospark.enums.FileDataSplitter;
 import org.datasyslab.geospark.serde.GeoSparkKryoRegistrator;
+import org.datasyslab.geospark.spatialOperator.KNNQuery;
 import org.datasyslab.geospark.spatialRDD.CircleRDD;
 import org.datasyslab.geospark.spatialRDD.PointRDD;
 import org.datasyslab.geospark.spatialRDD.PolygonRDD;
+import org.datasyslab.geospark.utils.RDDSampleUtils;
 import org.wololo.geojson.Feature;
 import org.wololo.geojson.FeatureCollection;
 import org.wololo.jts2geojson.GeoJSONWriter;
@@ -27,6 +29,7 @@ public class Main {
                 .set("spark.kryo.registrator", GeoSparkKryoRegistrator.class.getName());
         try (JavaSparkContext sc = new JavaSparkContext(sparkConf)) {
             String path = "result/";
+            GeometryFactory factory = new GeometryFactory();
             PointRDD pointRDD = new PointRDD(
                     sc,
                     "src/main/resources/checkinshape.csv",
@@ -42,11 +45,11 @@ public class Main {
 
             double circleRadius = 0.2;
             PolygonRDD circlePolygon = new PolygonRDD(
-                    pointRDD.rawSpatialRDD.map(point -> polygonAroundCenter(point, 32, circleRadius))
+                    pointRDD.rawSpatialRDD.map(point -> polygonAroundCenter(point, 32, circleRadius, factory))
             );
             double hexagonRadius = circleRadius * 2 / Math.sqrt(3);
             PolygonRDD hexagonPolygon = new PolygonRDD(
-                    pointRDD.rawSpatialRDD.map(point -> polygonAroundCenter(point, 6, hexagonRadius))
+                    pointRDD.rawSpatialRDD.map(point -> polygonAroundCenter(point, 6, hexagonRadius, factory))
             );
 
             circlePolygon.saveAsGeoJSON(path + "circle");
@@ -62,7 +65,7 @@ public class Main {
                 double offset = 0.01;
                 List<Polygon> polygons = new ArrayList<>();
                 for (double i = offset; i < 0.11; i += offset) {
-                    polygons.add(polygonAroundCenter(point, angles, i));
+                    polygons.add(polygonAroundCenter(point, angles, i, factory));
                 }
                 return new GeometryFactory().createGeometryCollection(polygons.toArray(new Polygon[0]));
             });
@@ -73,7 +76,7 @@ public class Main {
                 double offset = 0.01;
                 List<Feature> polygons = new ArrayList<>();
                 for (double i = offset; i < 0.11; i += offset) {
-                    polygons.add(new Feature(writer.write(polygonAroundCenter(point, angles, i)), null));
+                    polygons.add(new Feature(writer.write(polygonAroundCenter(point, angles, i, factory)), null));
                 }
                 return new FeatureCollection(polygons.toArray(new Feature[0]));
             });
@@ -83,8 +86,26 @@ public class Main {
             concentricCircles
                     .mapPartitions(GeoUtils::toFeatureCollection).saveAsTextFile(path + "concentricGroup");
 
+
+            //#########################################################################################################
+
+            Point point = factory.createPoint(new Coordinate(-88.331492, 32.324142));
+            Point randomPoint = GeoUtils.randomPointAroundCoordinate(point.getCoordinate(), 1.1, factory);
+            List<Polygon> polygons = new ArrayList<>();
+
+            // WOW
+            for (double i = .01; i <= .11; i += .01) {
+                polygons.add(GeoUtils.polygonAroundCenter(point, 32, i, factory));
+            }
+
+            PolygonRDD spatialPolygons = new PolygonRDD(sc.parallelize(polygons));
+            PolygonRDD nearestPolygon =
+                    new PolygonRDD(sc.parallelize(KNNQuery.SpatialKnnQuery(spatialPolygons, randomPoint, 2, false)));
+
+            JavaRDD<Geometry> geometries = nearestPolygon.getRawSpatialRDD().map(p -> (Geometry) p)
+                    .union(sc.parallelize(Collections.singletonList(randomPoint)));
+            geometries.coalesce(1).mapPartitions(GeoUtils::toFeatureCollection)
+                    .saveAsTextFile(path + "pointCircle");
         }
     }
-
-
 }
