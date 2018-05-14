@@ -1,4 +1,5 @@
 .idea
 target
+testResult
 result
 *.iml

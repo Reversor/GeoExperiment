@@ -1,111 +1,51 @@
-import com.vividsolutions.jts.geom.*;
 import crutches.GeoUtils;
+import crutches.SerializableComparator;
 import org.apache.spark.SparkConf;
+import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.serializer.KryoSerializer;
-import org.datasyslab.geospark.enums.FileDataSplitter;
+import org.datasyslab.geospark.geometryObjects.Circle;
 import org.datasyslab.geospark.serde.GeoSparkKryoRegistrator;
-import org.datasyslab.geospark.spatialOperator.KNNQuery;
-import org.datasyslab.geospark.spatialRDD.CircleRDD;
 import org.datasyslab.geospark.spatialRDD.PointRDD;
-import org.datasyslab.geospark.spatialRDD.PolygonRDD;
-import org.datasyslab.geospark.utils.RDDSampleUtils;
-import org.wololo.geojson.Feature;
-import org.wololo.geojson.FeatureCollection;
-import org.wololo.jts2geojson.GeoJSONWriter;
+import scala.Tuple2;
 
-import java.util.*;
+import java.util.List;
+import java.util.Optional;
 
-import static crutches.GeoUtils.*;
+import static crutches.GeoUtils.uglyDistance;
 
 public class Main {
 
     public static void main(String[] args) throws Exception {
+        long time;
+        GeoUtils.cleanDir("result/HELP");
+
         final SparkConf sparkConf = new SparkConf()
                 .setAppName("geo")
                 .setMaster("local[*]")
                 .set("spark.serializer", KryoSerializer.class.getName())
                 .set("spark.kryo.registrator", GeoSparkKryoRegistrator.class.getName());
         try (JavaSparkContext sc = new JavaSparkContext(sparkConf)) {
-            String path = "result/";
-            GeometryFactory factory = new GeometryFactory();
-            PointRDD pointRDD = new PointRDD(
-                    sc,
-                    "src/main/resources/checkinshape.csv",
-                    0,
-                    FileDataSplitter.CSV,
-                    false);
+            time = System.currentTimeMillis();
+            JavaRDD<Circle> circleRDD = sc.objectFile("testResult/circles/part-*");
+            JavaPairRDD<Circle, Long> indexedCircles = circleRDD.sortBy(Circle::getRadius, true, 1).zipWithIndex();
+            List<Tuple2<Circle, Long>> circles = indexedCircles.collect();
 
-            // Well
-            CircleRDD circleRDD = new CircleRDD(pointRDD, 0.2);
+            PointRDD pointRDD = new PointRDD(sc.objectFile("testResult/points/part-*"));
 
-
-            cleanDir(path);
-
-            double circleRadius = 0.2;
-            PolygonRDD circlePolygon = new PolygonRDD(
-                    pointRDD.rawSpatialRDD.map(point -> polygonAroundCenter(point, 32, circleRadius, factory))
-            );
-            double hexagonRadius = circleRadius * 2 / Math.sqrt(3);
-            PolygonRDD hexagonPolygon = new PolygonRDD(
-                    pointRDD.rawSpatialRDD.map(point -> polygonAroundCenter(point, 6, hexagonRadius, factory))
-            );
-
-            circlePolygon.saveAsGeoJSON(path + "circle");
-            hexagonPolygon.saveAsGeoJSON(path + "hexagon");
-            pointRDD.saveAsGeoJSON(path + "point");
-
-            hexagonPolygon.getRawSpatialRDD()
-                    .mapPartitions(GeoUtils::toFeatureCollection)
-                    .saveAsTextFile(path + "lol");
-
-            JavaRDD<GeometryCollection> concentricCircles = pointRDD.getRawSpatialRDD().map(point -> {
-                int angles = 32;
-                double offset = 0.01;
-                List<Polygon> polygons = new ArrayList<>();
-                for (double i = offset; i < 0.11; i += offset) {
-                    polygons.add(polygonAroundCenter(point, angles, i, factory));
-                }
-                return new GeometryFactory().createGeometryCollection(polygons.toArray(new Polygon[0]));
-            });
-            //NOPE
-            JavaRDD<FeatureCollection> anotherConcentricCircles = pointRDD.getRawSpatialRDD().map(point -> {
-                GeoJSONWriter writer = new GeoJSONWriter();
-                int angles = 32;
-                double offset = 0.01;
-                List<Feature> polygons = new ArrayList<>();
-                for (double i = offset; i < 0.11; i += offset) {
-                    polygons.add(new Feature(writer.write(polygonAroundCenter(point, angles, i, factory)), null));
-                }
-                return new FeatureCollection(polygons.toArray(new Feature[0]));
-            });
-
-            concentricCircles
-                    .map(GeoUtils::geometryToFeature).saveAsTextFile(path + "concentricPartial");
-            concentricCircles
-                    .mapPartitions(GeoUtils::toFeatureCollection).saveAsTextFile(path + "concentricGroup");
-
-
-            //#########################################################################################################
-
-            Point point = factory.createPoint(new Coordinate(-88.331492, 32.324142));
-            Point randomPoint = GeoUtils.randomPointAroundCoordinate(point.getCoordinate(), 1.1, factory);
-            List<Polygon> polygons = new ArrayList<>();
-
-            // WOW
-            for (double i = .01; i <= .11; i += .01) {
-                polygons.add(GeoUtils.polygonAroundCenter(point, 32, i, factory));
-            }
-
-            PolygonRDD spatialPolygons = new PolygonRDD(sc.parallelize(polygons));
-            PolygonRDD nearestPolygon =
-                    new PolygonRDD(sc.parallelize(KNNQuery.SpatialKnnQuery(spatialPolygons, randomPoint, 2, false)));
-
-            JavaRDD<Geometry> geometries = nearestPolygon.getRawSpatialRDD().map(p -> (Geometry) p)
-                    .union(sc.parallelize(Collections.singletonList(randomPoint)));
-            geometries.coalesce(1).mapPartitions(GeoUtils::toFeatureCollection)
-                    .saveAsTextFile(path + "pointCircle");
+            pointRDD.getRawSpatialRDD().mapToPair(point -> {
+                Optional<Tuple2<Circle, Long>> nearest = circles.stream()
+                        .filter(c -> uglyDistance(c._1.getCenterPoint(), point.getCoordinate()) < c._1.getRadius())
+                        .min(SerializableComparator.serialize(
+                                (c1, c2) -> c1._1.getRadius().compareTo(c2._1.getRadius())
+                        ));
+                return nearest
+                        .map(circleLongTuple2 -> new Tuple2<>(circleLongTuple2._2, point))
+                        .orElseGet(() -> new Tuple2<>(-1L, point));
+            }).saveAsObjectFile("result/HELP");
         }
+        time -= System.currentTimeMillis();
+        System.out.println(-time);
     }
 }

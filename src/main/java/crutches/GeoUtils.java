@@ -1,7 +1,9 @@
 package crutches;
 
 import com.vividsolutions.jts.geom.*;
-import org.apache.spark.api.java.function.FlatMapFunction;
+import org.datasyslab.geospark.geometryObjects.Circle;
+import org.datasyslab.geospark.utils.CRSTransformation;
+import org.locationtech.spatial4j.distance.DistanceUtils;
 import org.wololo.geojson.Feature;
 import org.wololo.geojson.FeatureCollection;
 import org.wololo.jts2geojson.GeoJSONWriter;
@@ -11,6 +13,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
+
+import static java.lang.Math.PI;
+import static java.lang.Math.random;
 
 public class GeoUtils {
 
@@ -35,13 +40,23 @@ public class GeoUtils {
         return result.iterator();
     }
 
+    public static Polygon circleToPolygon(Circle circle, GeometryFactory factory) {
+        return polygonAroundCenter(circle.getCenterGeometry(), 32, circle.getRadius(), factory);
+    }
+
+    public static Point randomPoint(Point p, Double side, GeometryFactory factory) {
+        double x = p.getX() + side * Math.random() / 2;
+        double y = p.getY() + side * Math.random() / 2;
+        return factory.createPoint(new Coordinate(x, y));
+    }
+
     public static Polygon polygonAroundCenter(Geometry geometry, int angles, double radius, GeometryFactory factory) {
         Coordinate center = geometry.getCentroid().getCoordinate();
         Coordinate[] polygonCoordinate = new Coordinate[angles + 1];
-        double distanceX = radius / (111.320 * Math.cos(center.y * Math.PI / 180));
-        double distanceY = radius / 110.574;
+        double distanceX = radius / (111320 * Math.cos(center.y * PI / 180));
+        double distanceY = radius / 110574;
         for (int i = 0; i <= angles; i++) {
-            double theta = ((double) i / angles) * (2 * Math.PI);
+            double theta = ((double) i / angles) * (2 * PI);
             polygonCoordinate[i] = (new Coordinate(
                     center.x + distanceX * Math.cos(theta),
                     center.y + distanceY * Math.sin(theta)
@@ -59,10 +74,10 @@ public class GeoUtils {
     }
 
     public static Point randomPointAroundCoordinate(Coordinate coordinate, double radius, GeometryFactory factory) {
-        double randomDouble = Math.random();
-        double angle = randomDouble * 2 * Math.PI;
-        double x = randomDouble * Math.cos(angle) * radius / (111.320 * Math.cos(coordinate.y * Math.PI / 180));
-        double y = randomDouble * Math.sin(angle) * radius / 110.574;
+        double angle = Math.random() * 360 * 2 * PI;
+        radius *= Math.random();
+        double x = Math.cos(angle) * radius / (111320 * Math.cos(coordinate.y * PI / 180));
+        double y = Math.sin(angle) * radius / 110574;
         return factory.createPoint(new Coordinate(coordinate.x + x, coordinate.y + y));
     }
 
@@ -77,6 +92,51 @@ public class GeoUtils {
                 }
             });
         }
+    }
+
+    public static <T extends Geometry> T toWebMercator(T geometry, String sourceEspgCRSCode) {
+        return CRSTransformation.Transform(sourceEspgCRSCode, "epsg:3785", geometry);
+    }
+
+    public static <T extends Geometry> T toWGS84(T geometry, String sourceEspgCRSCode) {
+        System.out.println(geometry.getClass());
+        return CRSTransformation.Transform(sourceEspgCRSCode, "epsg:4326", geometry);
+    }
+
+    public static List<Point> randomPoints(Coordinate c, int count, GeometryFactory factory) {
+        double offset = DistanceUtils.dist2Degrees(110, DistanceUtils.EARTH_EQUATORIAL_RADIUS_KM * 1000);
+        List<Point> pointList = new ArrayList<>(count);
+        for (int i = 0; i < count; i++) {
+            double x = c.x - offset + 2 * offset * random();
+            double y = c.y - offset + 2 * offset * random();
+            pointList.add(factory.createPoint(new Coordinate(x, y)));
+        }
+        return pointList;
+    }
+
+    public static double uglyDistance(Coordinate c1, Coordinate c2) {
+        if (c1.x == c2.x && c1.y == c2.y) {
+            return 0.0;
+        }
+
+        double lat1 = c1.x * PI / 180;
+        double lon1 = c1.y * PI / 180;
+        double lat2 = c2.x * PI / 180;
+        double lon2 = c2.y * PI / 180;
+
+        double cosLat1 = Math.cos(lat1);
+        double sinLat1 = Math.sin(lat1);
+        double cosLat2 = Math.cos(lat2);
+        double sinLat2 = Math.sin(lat2);
+        double dLon = lon2 - lon1;
+        double cosDLon = Math.cos(dLon);
+        double sinDLon = Math.sin(dLon);
+
+        double a = cosLat2 * sinDLon;
+        double b = cosLat1 * sinLat2 - sinLat1 * cosLat2 * cosDLon;
+        double c = sinLat1 * sinLat2 + cosLat1 * cosLat2 * cosDLon;
+
+        return Math.atan2(Math.sqrt(a * a + b * b), c) * DistanceUtils.EARTH_EQUATORIAL_RADIUS_KM * 1000;
     }
 
 }

@@ -36,22 +36,23 @@
             <artifactId>spark-sql_2.11</artifactId>
             <version>${spark.version}</version>
         </dependency>
-
         <dependency>
             <groupId>org.datasyslab</groupId>
             <artifactId>geospark</artifactId>
             <version>${geospark.version}</version>
         </dependency>
-        <!--<dependency>
-            <groupId>org.datasyslab</groupId>
-            <artifactId>geospark-viz</artifactId>
-            <version>${geospark.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.datasyslab</groupId>
-            <artifactId>geospark-sql_2.3</artifactId>
-            <version>${geospark.version}</version>
-        </dependency>-->
 
+        <dependency>
+            <groupId>org.locationtech.spatial4j</groupId>
+            <artifactId>spatial4j</artifactId>
+            <version>0.7</version>
+        </dependency>
+
+        <dependency>
+            <groupId>junit</groupId>
+            <artifactId>junit</artifactId>
+            <version>4.12</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 </project>
