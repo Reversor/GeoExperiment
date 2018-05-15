@@ -1,48 +1,17 @@
 import com.vividsolutions.jts.geom.Coordinate;
 import com.vividsolutions.jts.geom.GeometryFactory;
 import com.vividsolutions.jts.geom.Point;
-import com.vividsolutions.jts.operation.distance.DistanceOp;
 import crutches.GeoUtils;
 import org.apache.spark.api.java.JavaRDD;
 import org.datasyslab.geospark.geometryObjects.Circle;
 import org.junit.Test;
-import org.locationtech.spatial4j.distance.DistanceUtils;
 import scala.Tuple2;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
-import static org.locationtech.spatial4j.distance.DistanceUtils.distLawOfCosinesRAD;
-
 public class Circles extends BaseTestClass {
-    @Test
-    public void webMercatorCircle() {
-        GeometryFactory factory = new GeometryFactory();
-        Point center = factory.createPoint(new Coordinate(139.7612, 35.6874));
-//        Point notRandomPoint = factory.createPoint(new Coordinate(-88.331482, 32.325124)); // 115.80842264912752
-        Point notRandomPoint = factory.createPoint(new Coordinate(139.76185, 35.6866)); // 42.08342151625018
-
-        double radius = 10d;
-
-        Circle circle = new Circle(center, radius);
-        Point webMercatorCenter = (Point) GeoUtils.toWebMercator(circle.getCenterGeometry(), "epsg:4326");
-
-        Point webMercatorPoint = GeoUtils.toWebMercator(notRandomPoint, "epsg:4326");
-
-        System.out.println(webMercatorPoint.distance(webMercatorCenter));
-        double distance = distLawOfCosinesRAD(
-                center.getX(), center.getY(),
-                notRandomPoint.getX(), notRandomPoint.getY());
-        System.out.println(DistanceUtils.degrees2Dist(distance, DistanceUtils.EARTH_EQUATORIAL_RADIUS_KM));
-
-        System.out.println(DistanceUtils.degrees2Dist(center.distance(notRandomPoint), DistanceUtils.EARTH_EQUATORIAL_RADIUS_KM));
-        System.out.println(DistanceUtils.degrees2Dist(DistanceOp.distance(center, notRandomPoint), 6356752.314245));
-        double webMercatorDistance = distLawOfCosinesRAD(
-                webMercatorCenter.getX(), webMercatorCenter.getY(),
-                webMercatorPoint.getX(), webMercatorPoint.getY());
-        System.out.println(DistanceUtils.degrees2Dist(webMercatorDistance, DistanceUtils.EARTH_EQUATORIAL_RADIUS_KM));
-    }
 
     @Test
     public void concentricCircles() throws IOException {
@@ -63,16 +32,14 @@ public class Circles extends BaseTestClass {
     @Test
     public void look() throws IOException {
         GeoUtils.cleanDir("result/Roach");
-        JavaRDD<Tuple2<Long, Point>> points = sc.objectFile("result/HELP/part-00000");
-//        JavaRDD<Point> points = sc.objectFile("result/points/part-00000");
-
+        JavaRDD<Tuple2<Long, Point>> points = sc.objectFile("result/HELP/part-*");
 
         points
-                .filter(t -> t._1 == -1)
+//                .filter(t -> t._1 == -1)
+                .filter(t -> t._1 == 3)
                 .map(t -> t._2)
                 .coalesce(8)
                 .map(p -> p.getX() + ", " + p.getY())
-//                .mapPartitions(GeoUtils::toFeatureCollection)
                 .saveAsTextFile("result/Roach");
     }
 
@@ -82,5 +49,93 @@ public class Circles extends BaseTestClass {
         GeoUtils.cleanDir("result/points");
         sc.parallelize(GeoUtils.randomPoints(new Coordinate(139.7612, 35.6874), 1_000_000, factory))
                 .saveAsObjectFile("result/points");
+    }
+
+    //##################################################################################################################
+
+    /**
+     * (-1,124288)
+     * (0,8089)
+     * (1,24153)
+     * (2,39933)
+     * (3,55582)
+     * (4,71946)
+     * (5,87669)
+     * (6,103747)
+     * (7,119765)
+     * (8,136370)
+     * (9,119130)
+     * (10,109328)gi
+     */
+    @Test
+    public void count() throws IOException {
+        String path = "result/CountByCircle";
+        GeoUtils.cleanDir(path);
+        JavaRDD<Tuple2<Long, Point>> points = sc.objectFile("result/HELP/part-*");
+        points.mapToPair(t -> Tuple2.apply(t._1, 1L)).reduceByKey(Long::sum)
+                .coalesce(1).saveAsTextFile(path);
+    }
+
+    /**
+     * (0,25.748086693406826)
+     * (1,25.627128936656987)
+     * (2,25.42213736995463)
+     * (3,25.27471441981065)
+     * (4,25.445692301532226)
+     * (5,25.369008556224312)
+     * (6,25.402842893776718)
+     * (7,25.414922345867794)
+     * (8,25.53407010522561)
+     * (9,19.958029863723674)
+     * (10,16.5715158270007)
+     */
+    @Test
+    public void density() throws IOException {
+        String path = "result/Density";
+        GeoUtils.cleanDir(path);
+        JavaRDD<Tuple2<Long, Point>> points = sc.objectFile("result/HELP/part-*");
+        points
+                .mapToPair(t -> Tuple2.apply(t._1, 1L)).reduceByKey(Long::sum)
+                .filter(t -> t._1 >= 0)
+                .mapToPair(t -> {
+                    long pointsCount = t._2;
+                    double outerRadius = (t._1 + 1) * 10;
+                    double innerRadius = t._1 * 10;
+                    double area = Math.PI * (outerRadius * outerRadius - innerRadius * innerRadius);
+                    return Tuple2.apply(t._1, pointsCount / area);
+                })
+                .coalesce(1).saveAsTextFile(path);
+    }
+
+    /**
+     * (0,3.248360321180461)
+     * (1,3.2436515144624893)
+     * (2,3.235620344443537)
+     * (3,3.229804465923242)
+     * (4,3.236546467433777)
+     * (5,3.2335282934713128)
+     * (6,3.2348610927132)
+     * (7,3.235336495449295)
+     * (8,3.240013642958172)
+     * (9,2.9936315617894746)
+     * (10,2.807685307459645)
+     */
+
+    @Test
+    public void proximity() throws IOException {
+        String path = "result/Proximity";
+        GeoUtils.cleanDir(path);
+        JavaRDD<Tuple2<Long, Point>> points = sc.objectFile("result/HELP/part-*");
+        points
+                .mapToPair(t -> Tuple2.apply(t._1, 1L)).reduceByKey(Long::sum)
+                .filter(t -> t._1 >= 0)
+                .mapToPair(t -> {
+                    long pointsCount = t._2;
+                    double outerRadius = (t._1 + 1) * 10;
+                    double innerRadius = t._1 * 10;
+                    double area = Math.PI * (outerRadius * outerRadius - innerRadius * innerRadius);
+                    return Tuple2.apply(t._1, Math.log(pointsCount / area));
+                })
+                .coalesce(1).saveAsTextFile(path);
     }
 }

@@ -13,7 +13,7 @@ import scala.Tuple2;
 import java.util.List;
 import java.util.Optional;
 
-import static crutches.GeoUtils.uglyDistance;
+import static crutches.GeoUtils.anotherDistance;
 
 public class Main {
 
@@ -32,11 +32,11 @@ public class Main {
             JavaPairRDD<Circle, Long> indexedCircles = circleRDD.sortBy(Circle::getRadius, true, 1).zipWithIndex();
             List<Tuple2<Circle, Long>> circles = indexedCircles.collect();
 
-            PointRDD pointRDD = new PointRDD(sc.objectFile("testResult/points/part-*"));
+            PointRDD pointRDD = new PointRDD(sc.objectFile("result/points/part-*"));
 
             pointRDD.getRawSpatialRDD().mapToPair(point -> {
                 Optional<Tuple2<Circle, Long>> nearest = circles.stream()
-                        .filter(c -> uglyDistance(c._1.getCenterPoint(), point.getCoordinate()) < c._1.getRadius())
+                        .filter(c -> anotherDistance(c._1.getCenterPoint(), point.getCoordinate()) < c._1.getRadius())
                         .min(SerializableComparator.serialize(
                                 (c1, c2) -> c1._1.getRadius().compareTo(c2._1.getRadius())
                         ));

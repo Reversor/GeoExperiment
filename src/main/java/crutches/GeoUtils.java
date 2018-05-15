@@ -1,6 +1,8 @@
 package crutches;
 
 import com.vividsolutions.jts.geom.*;
+import net.sf.geographiclib.Geodesic;
+import net.sf.geographiclib.GeodesicMask;
 import org.datasyslab.geospark.geometryObjects.Circle;
 import org.datasyslab.geospark.utils.CRSTransformation;
 import org.locationtech.spatial4j.distance.DistanceUtils;
@@ -139,4 +141,26 @@ public class GeoUtils {
         return Math.atan2(Math.sqrt(a * a + b * b), c) * DistanceUtils.EARTH_EQUATORIAL_RADIUS_KM * 1000;
     }
 
+    public static double anotherDistance(Coordinate c1, Coordinate c2) {
+        if (c1.x == c2.x && c1.y == c2.y) {
+            return 0.0;
+        }
+
+        double lat1 = c1.y * PI / 180;
+        double lon1 = c1.x * PI / 180;
+        double lat2 = c2.y * PI / 180;
+        double lon2 = c2.x * PI / 180;
+
+        double hsinX = Math.sin((lon1 - lon2) * 0.5);
+        double hsinY = Math.sin((lat1 - lat2) * 0.5);
+        double h = hsinY * hsinY + (Math.cos(lat1) * Math.cos(lat2) * hsinX * hsinX);
+        if (h > 1) {
+            h = 1;
+        }
+        return 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h)) * DistanceUtils.EARTH_EQUATORIAL_RADIUS_KM * 1000;
+    }
+
+    public static double distance(Coordinate c1, Coordinate c2) {
+        return Geodesic.WGS84.Inverse(c1.y, c1.x, c2.y, c2.x, GeodesicMask.DISTANCE).s12;
+    }
 }
