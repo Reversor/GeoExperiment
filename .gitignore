@@ -3,3 +3,4 @@ target
 testResult
 result
 *.iml
+*.jfr

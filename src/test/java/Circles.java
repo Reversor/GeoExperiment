@@ -2,53 +2,112 @@ import com.vividsolutions.jts.geom.Coordinate;
 import com.vividsolutions.jts.geom.GeometryFactory;
 import com.vividsolutions.jts.geom.Point;
 import crutches.GeoUtils;
+import org.apache.commons.lang.RandomStringUtils;
 import org.apache.spark.api.java.JavaRDD;
-import org.datasyslab.geospark.geometryObjects.Circle;
+import org.apache.spark.api.java.function.MapFunction;
+import org.apache.spark.sql.Dataset;
+import org.apache.spark.sql.Encoders;
+import org.apache.spark.sql.Row;
+import org.apache.spark.sql.SQLContext;
+import org.apache.spark.sql.types.DataTypes;
+import org.apache.spark.sql.types.StructField;
 import org.junit.Test;
 import scala.Tuple2;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.Random;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import static org.apache.commons.math3.util.FastMath.*;
+import static org.apache.commons.math3.util.FastMath.sqrt;
 
 public class Circles extends BaseTestClass {
 
     @Test
-    public void concentricCircles() throws IOException {
-        GeometryFactory factory = new GeometryFactory();
-        Point center = factory.createPoint(new Coordinate(139.7612, 35.6874));
+    public void usersCount() throws IOException {
+        SQLContext sqlContext = SQLContext.getOrCreate(sc.sc());
+        Dataset<Row> poi = sqlContext.read().format("csv").option("header", "false")
+                .schema(DataTypes.createStructType(
+                        new StructField[]{
+                                DataTypes.createStructField("x1", DataTypes.DoubleType, false),
+                                DataTypes.createStructField("y1", DataTypes.DoubleType, false)
+                        }
+                ))
+                .load("result/poi/part-*");
 
-        List<Circle> circleList = new ArrayList<>();
+        Dataset<Row> signal = sqlContext.read().format("csv").option("header", "false")
+                .schema(DataTypes.createStructType(
+                        new StructField[]{
+                                DataTypes.createStructField("x2", DataTypes.DoubleType, false),
+                                DataTypes.createStructField("y2", DataTypes.DoubleType, false),
+                                DataTypes.createStructField("user_id", DataTypes.StringType, false)
+                        }
+                ))
+                .load("result/randomed/part-*");
 
-        for (int i = 1; i <= 11; i++) {
-            circleList.add(new Circle(center, i * 10d));
-        }
+        signal.map((MapFunction<Row, Tuple2<String, Double>>) row -> {
+            double x = row.getAs("x1");
+            double y = row.getAs("y1");
+            double xUser = row.getAs("x2");
+            double yUser = row.getAs("y2");
+            double distance = 0.0;
+            if (!(x == xUser) || !(y == yUser)) {
+                double lat1 = y * PI / 180;
+                double lon1 = x * PI / 180;
+                double lat2 = yUser * PI / 180;
+                double lon2 = xUser * PI / 180;
 
-        String dir = "testResult/circles";
-        GeoUtils.cleanDir(dir);
-        sc.parallelize(circleList).saveAsObjectFile(dir);
+                double hsinX = sin((lon1 - lon2) * 0.5);
+                double hsinY = sin((lat1 - lat2) * 0.5);
+                double h = hsinY * hsinY + (cos(lat1) * cos(lat2) * hsinX * hsinX);
+                if (h > 1) {
+                    h = 1;
+                }
+                distance = 2 * atan2(sqrt(h), sqrt(1 - h)) * 63_781_370;
+            }
+            String userId = row.getAs("user_id");
+            return new Tuple2<>(userId, distance);
+        }, Encoders.tuple(Encoders.STRING(), Encoders.DOUBLE())).toDF("user_id", "distance");
     }
 
     @Test
     public void look() throws IOException {
-        GeoUtils.cleanDir("result/Roach");
-        JavaRDD<Tuple2<Long, Point>> points = sc.objectFile("result/HELP/part-*");
+        GeoUtils.cleanDir("result/check");
+        JavaRDD<Tuple2<Coordinate, Integer>> points = sc.objectFile("result/shit/part-*");
 
         points
-//                .filter(t -> t._1 == -1)
-                .filter(t -> t._1 == 3)
-                .map(t -> t._2)
-                .coalesce(8)
-                .map(p -> p.getX() + ", " + p.getY())
-                .saveAsTextFile("result/Roach");
+                .mapToPair(t -> Tuple2.apply(t._2, 1L))
+                .reduceByKey(Long::sum)
+                .saveAsTextFile("result/check");
+//                .saveAsTextFile("result/Roach");
+    }
+
+    @Test
+    public void user() throws IOException {
+        JavaRDD<Point> points = sc.objectFile("result/points/part-*");
+        Integer maxUserId = 200;
+        GeoUtils.cleanDir("result/gaussian");
+        AtomicInteger index = new AtomicInteger(20);
+        Random random = new Random();
+        points
+                .map(p -> new Tuple2<>(p.getCoordinate(),
+                        random.nextGaussian() * maxUserId))
+                .map(t -> t._1.y + ", " + t._1.x + ", " + Math.round(t._2))
+                .coalesce(4)
+                .saveAsTextFile("result/gaussian");
     }
 
     @Test
     public void createPoints() throws IOException {
         GeometryFactory factory = new GeometryFactory();
-        GeoUtils.cleanDir("result/points");
-        sc.parallelize(GeoUtils.randomPoints(new Coordinate(139.7612, 35.6874), 1_000_000, factory))
-                .saveAsObjectFile("result/points");
+        GeoUtils.cleanDir("result/poi");
+
+        sc.parallelize(GeoUtils.randomPoints(new Coordinate(139.7612, 35.6874), 1_000, factory))
+                .zipWithIndex()
+                .map(t -> t._1.getY() + ", " + t._1.getX() + ", " + RandomStringUtils.randomAlphabetic(3) + t._2)
+                .coalesce(2)
+                .saveAsTextFile("result/poi");
+
     }
 
     //##################################################################################################################
@@ -72,7 +131,8 @@ public class Circles extends BaseTestClass {
         String path = "result/CountByCircle";
         GeoUtils.cleanDir(path);
         JavaRDD<Tuple2<Long, Point>> points = sc.objectFile("result/HELP/part-*");
-        points.mapToPair(t -> Tuple2.apply(t._1, 1L)).reduceByKey(Long::sum)
+        points.mapToPair(t -> Tuple2.apply(t._1, 1L))
+                .reduceByKey(Long::sum)
                 .coalesce(1).saveAsTextFile(path);
     }
 

@@ -22,16 +22,9 @@
 
     <properties>
         <spark.version>2.3.0</spark.version>
-        <geospark.version>1.1.2</geospark.version>
     </properties>
 
     <dependencies>
-        <dependency>
-            <groupId>net.sf.geographiclib</groupId>
-            <artifactId>GeographicLib-Java</artifactId>
-            <version>1.49</version>
-        </dependency>
-
         <dependency>
             <groupId>org.apache.spark</groupId>
             <artifactId>spark-core_2.11</artifactId>
@@ -42,19 +35,6 @@
             <artifactId>spark-sql_2.11</artifactId>
             <version>${spark.version}</version>
         </dependency>
-        <dependency>
-            <groupId>org.datasyslab</groupId>
-            <artifactId>geospark</artifactId>
-            <version>${geospark.version}</version>
-        </dependency>
-
-        <dependency>
-            <groupId>org.locationtech.spatial4j</groupId>
-            <artifactId>spatial4j</artifactId>
-            <version>0.7</version>
-        </dependency>
-
-
         <dependency>
             <groupId>junit</groupId>
             <artifactId>junit</artifactId>
